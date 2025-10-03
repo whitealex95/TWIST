@@ -1,5 +1,6 @@
 import os, pickle, yaml
 import logging
+import numpy as np
 
 import torch
 
@@ -52,7 +53,30 @@ class MotionLib:
             self._motion_names.append(os.path.basename(curr_file))
             try:
                 with open(curr_file, "rb") as f:
-                    motion_data = pickle.load(f)
+                    try:
+                        motion_data = pickle.load(f)
+                    except ModuleNotFoundError as e:
+                        if 'numpy._core' in str(e):
+                            # Handle numpy version compatibility issue
+                            import numpy as np
+                            import sys
+                            # Create a comprehensive compatibility mapping for numpy._core
+                            sys.modules['numpy._core'] = np
+                            sys.modules['numpy._core.multiarray'] = np.core.multiarray
+                            sys.modules['numpy._core._multiarray_umath'] = np.core._multiarray_umath
+                            sys.modules['numpy._core.umath'] = np.core.umath
+                            sys.modules['numpy._core.numeric'] = np.core.numeric
+                            try:
+                                sys.modules['numpy._core._exceptions'] = np.core._exceptions
+                            except AttributeError:
+                                # Create a mock module for _exceptions if it doesn't exist
+                                import types
+                                mock_exceptions = types.ModuleType('numpy._core._exceptions')
+                                sys.modules['numpy._core._exceptions'] = mock_exceptions
+                            f.seek(0)  # Reset file pointer
+                            motion_data = pickle.load(f)
+                        else:
+                            raise e
                     
                     fps = motion_data["fps"]
                     curr_weight = motion_weights[i]
