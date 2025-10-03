@@ -113,7 +113,7 @@ class RealTimePolicyController:
         self.viewer.opt.flags[mujoco.mjtVisFlag.mjVIS_CONTACTPOINT] = 0
         self.viewer.opt.flags[mujoco.mjtVisFlag.mjVIS_TRANSPARENT] = 0
         self.viewer.opt.flags[mujoco.mjtVisFlag.mjVIS_COM] = 0
-        self.viewer.cam.distance = 2.0
+        self.viewer.cam.distance = 2.5
         
         # Create offscreen renderer for video recording
         if record_video:
@@ -121,7 +121,7 @@ class RealTimePolicyController:
             # Create a camera for rendering
             self.render_camera = mujoco.MjvCamera()
             self.render_camera.type = mujoco.mjtCamera.mjCAMERA_FREE
-            self.render_camera.distance = 2.0
+            self.render_camera.distance = 2.5
 
         # Example defaults & placeholders
         self.num_actions = 23
@@ -306,7 +306,7 @@ class RealTimePolicyController:
                     rpy = quatToEuler(pelvis_quat)
                     yaw = rpy[2]
                     
-                    camera_distance = 2.0
+                    camera_distance = 2.5
                     
                     # Point camera at the torso (face)
                     self.viewer.cam.lookat = torso_pos
