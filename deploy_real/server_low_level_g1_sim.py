@@ -114,6 +114,14 @@ class RealTimePolicyController:
         self.viewer.opt.flags[mujoco.mjtVisFlag.mjVIS_TRANSPARENT] = 0
         self.viewer.opt.flags[mujoco.mjtVisFlag.mjVIS_COM] = 0
         self.viewer.cam.distance = 2.0
+        
+        # Create offscreen renderer for video recording
+        if record_video:
+            self.renderer = mujoco.Renderer(self.model, height=480, width=640)
+            # Create a camera for rendering
+            self.render_camera = mujoco.MjvCamera()
+            self.render_camera.type = mujoco.mjtCamera.mjCAMERA_FREE
+            self.render_camera.distance = 2.0
 
         # Example defaults & placeholders
         self.num_actions = 23
@@ -290,12 +298,35 @@ class RealTimePolicyController:
                     self.viewer.user_scn.ngeom = 0
                     draw_root_velocity(self.model, self.data, self.viewer, [0,0,0], 0, "pelvis", [1,0,0,1])
                     
-                    # make camera follow the pelvis
-                    pelvis_pos = self.data.xpos[self.model.body("pelvis").id]
-                    self.viewer.cam.lookat = pelvis_pos
+                    # Make camera face the robot from the front
+                    torso_pos = self.data.xpos[self.model.body("torso_link").id]
+                    
+                    # Get robot's orientation (yaw angle)
+                    pelvis_quat = self.data.sensor('orientation').data.astype(np.float32)
+                    rpy = quatToEuler(pelvis_quat)
+                    yaw = rpy[2]
+                    
+                    camera_distance = 2.0
+                    
+                    # Point camera at the torso (face)
+                    self.viewer.cam.lookat = torso_pos
+                    self.viewer.cam.azimuth = np.rad2deg(yaw) + 180
+                    self.viewer.cam.elevation = 0
+                    self.viewer.cam.distance = camera_distance
+                    
                     self.viewer.sync()
                     if mp4_writer is not None:
-                        img = self.viewer.read_pixels()
+                        # Set camera to match viewer camera settings
+                        self.render_camera.lookat[:] = torso_pos
+                        self.render_camera.azimuth = np.rad2deg(yaw) + 180
+                        self.render_camera.elevation = 0
+                        self.render_camera.distance = camera_distance
+                        
+                        # Update renderer with current state and camera
+                        self.renderer.update_scene(self.data, camera=self.render_camera)
+                        
+                        # Render the image
+                        img = self.renderer.render()
                         mp4_writer.append_data(img)
 
                 # PD control
