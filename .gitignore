@@ -34,3 +34,8 @@ retarget_lib/
 body_models/
 
 joao_data/
+# Simulation video
+debug_sim.mp4
+
+# Unitree SDK (local only)
+unitree_sdk2_python/
