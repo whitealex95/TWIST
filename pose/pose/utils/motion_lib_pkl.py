@@ -84,9 +84,7 @@ class MotionLib:
                     
                     root_pos = torch.tensor(motion_data["root_pos"], dtype=torch.float, device=self._device)
                     root_rot = torch.tensor(motion_data["root_rot"], dtype=torch.float, device=self._device)
-                    dof_idx_twist_from_gmr = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 22, 23, 24, 25]
-                    dof_pos = torch.tensor(motion_data["dof_pos"][...,dof_idx_twist_from_gmr],
-                                           dtype=torch.float, device=self._device)
+                    dof_pos = torch.tensor(motion_data["dof_pos"], dtype=torch.float, device=self._device)
 
                     if motion_data["local_body_pos"] is not None:
                         local_body_pos = torch.tensor(motion_data["local_body_pos"], dtype=torch.float, device=self._device)
