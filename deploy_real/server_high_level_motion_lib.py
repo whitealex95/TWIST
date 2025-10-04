@@ -64,7 +64,25 @@ def build_mimic_obs(
         other_ids = [f for f in range(25) if f not in wrist_ids]
         dof_pos_with_wrist[..., other_ids] = dof_pos
         dof_pos = dof_pos_with_wrist
-        
+    
+    adjust_root_height = True
+    if adjust_root_height:
+        root_pos[..., 2] -= 0.1 # adjust root height down a bit
+
+    ignore_root_xy_vel = True
+    if ignore_root_xy_vel:
+        root_vel[..., :2] *= 0.0
+    
+    ignore_lower_body = False
+    if ignore_lower_body:
+        dof_pos[..., :12] *= 0.0
+    
+    ignore_waist = False
+    if ignore_waist:
+        dof_pos[..., 12:15] *= 0.0
+        # roll *= 0.0
+        # pitch *= 0.0
+
     mimic_obs_buf = torch.cat((
                 root_pos[..., 2:3],
                 roll, pitch, yaw,
