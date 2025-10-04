@@ -184,7 +184,7 @@ def main(args, xml_file, robot_base):
                 robot_base_pos = sim_data.xpos[sim_model.body(robot_base).id]
                 viewer.cam.lookat = robot_base_pos
                 # set distance to pelvis
-                viewer.cam.distance = 2.0
+                viewer.cam.distance = 2.5
                 viewer.sync()
                 
             # Sleep to maintain real-time pace
