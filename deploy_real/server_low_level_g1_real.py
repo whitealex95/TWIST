@@ -16,10 +16,10 @@ from robot_control.config import Config
 import os
 from data_utils.rot_utils import quatToEuler
 
-from robot_control.dex_hand_wrapper import Dex3_1_Controller
+# from robot_control.dex_hand_wrapper import Dex3_1_Controller
 from data_utils.params import DEX31_QPOS_OPEN, DEX31_QPOS_CLOSE
 
-from robot_control.speaker import Speaker
+# from robot_control.speaker import Speaker
 
 def extract_mimic_obs_to_body_and_wrist(mimic_obs):
     total_degrees = 33
