@@ -1,3 +1,98 @@
+import socket, struct
+import time
+import json
+
+UDP_IP = "127.0.0.1"
+UDP_PORT = 54010
+BIG_NUMBER = 100000
+
+import numpy as np
+import threading
+
+class Switch4EAIController:
+    def __init__(self, sleep_interval=0.01, default_stand=0):
+        command = {}
+        command["root_pos"]      = np.array([3.0, 0.0, 0.75])
+        command["root_rot"]      = np.array([0, 0, 0, 1])
+        command["root_vel"]      = np.array([0, 0, 0])
+        command["root_ang_vel"]  = np.array([0, 0, 0])
+        command["dof_pos"]       = np.zeros(23)  # 6+6+3+4+4
+        self.command = command
+        self.sleep_interval = sleep_interval
+
+        # UDP setting
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.bind((UDP_IP, UDP_PORT))
+
+        def receive_loop():
+            self.last_receive_time = time.time()
+            while True:
+                # num_elements = 36  # 3 + 4 + 3 + 3 + 23
+                # msg, valid = server.receive_message(num_elements=num_elements, data_type='f')  # 3 + 4 + 29(dof_pos)
+                data, addr = sock.recvfrom(65535)
+                msg = json.loads(data.decode("utf-8"))
+                receive_time = time.time()
+                valid = True
+                if valid and msg is not None:
+                    print(f"Received full message: {len(msg)} elements, dt: {receive_time - self.last_receive_time:.3f} s")
+                    self.update_command(msg)
+                else:
+                    time.sleep(self.sleep_interval)  # Avoid tight loop if no data
+                self.last_receive_time = receive_time
+
+        # Start background thread for receiving
+        receiver_thread = threading.Thread(target=receive_loop, daemon=True)
+        receiver_thread.start()
+
+    def extract_dof_positions(self, dof_pos):
+        """
+        Extract and validate DOF positions for the robot.
+        
+        Args:
+            dof_pos (np.array): Full DOF positions
+            
+        Returns:
+            np.array: 23 DOF positions
+        """
+        # TODO: Make it correct.
+        if len(dof_pos) == 23:
+            return dof_pos
+        elif len(dof_pos) == 29:
+            # Convert 29 dof to 23 dof
+            dof_idx_twist_from_gmr = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 22, 23, 24, 25]
+            dof_pos = dof_pos[..., dof_idx_twist_from_gmr]
+            return dof_pos
+        else:
+            raise ValueError(f"Unexpected DOF positions length: {len(dof_pos)}. Expected 23 or 29.")
+
+    def update_command(self, msg):
+        """Update the command with new values from the motion streamer."""
+        if msg is not None:
+            # Extract root position (first 3 elements)
+            self.command["root_pos"] = msg['root_pos']
+            
+            # Extract root rotation (next 4 elements - quaternion xyzw)
+            if 'root_rot_xyzw' in msg.keys():
+                self.command["root_rot"] = np.array(msg['root_rot_xyzw'])
+            else:
+                self.command["root_rot"] = np.array(msg['root_rot'])
+            
+            # Extract DOF positions (remaining 23 elements)
+            # dof_pos_raw = np.array(msg[7:])
+            dof_pos_raw = np.array(msg['dof_pos'])
+            dof_pos = self.extract_dof_positions(dof_pos_raw)
+            self.command["dof_pos"] = dof_pos
+            
+            
+            print(f"Updated command - root_pos: {self.command['root_pos']}, "
+                  f"root_rot: {self.command['root_rot']}, "
+                  f"dof_pos shape: {self.command['dof_pos'].shape}")
+        else:
+            print(f"Invalid message: expected 36 elements, got {len(msg) if msg else 0}")
+
+    def get_command(self):
+        return self.command
+
 #!/usr/bin/env python
 import argparse
 import time
@@ -10,7 +105,7 @@ from rich import print
 import os
 import mujoco
 from mujoco.viewer import launch_passive
-# ---------------------------------------------------------------------
+# ------------------------------------  ---------------------------------
 # Example imports: adapt to your actual file structure
 # ---------------------------------------------------------------------
 from pose.utils.motion_lib_pkl import MotionLib
@@ -21,42 +116,39 @@ from data_utils.params import DEFAULT_MIMIC_OBS, DEFAULT_ACTION_HAND
 # ---------------------------------------------------------------------
 # A small helper to replicate "mimic obs" logic from your code
 # ---------------------------------------------------------------------
-def build_mimic_obs(
-    motion_lib: MotionLib,
-    t_step: int,
-    control_dt: float,
-    tar_obs_steps,
+def build_mimic_obs_switch4eai(
+    switch4eai_controller: Switch4EAIController,
     robot_type: str = "g1"
 ):
     """
     Build the mimic_obs at time-step t_step, referencing the code in MimicRunner.
     """
-    device = torch.device("cuda")
-    # Build times
-    motion_times = torch.tensor([t_step * control_dt], device=device).unsqueeze(-1)
-    obs_motion_times = tar_obs_steps * control_dt + motion_times
-    obs_motion_times = obs_motion_times.flatten()
-    
-    # Suppose we only have a single motion in the .pkl
-    motion_ids = torch.zeros(len(tar_obs_steps), dtype=torch.int, device=device)
-    
-    # Retrieve motion frames
-    root_pos, root_rot, root_vel, root_ang_vel, dof_pos, _, body_pos = motion_lib.calc_motion_frame(motion_ids, obs_motion_times)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    dof_idx_twist_from_gmr = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 22, 23, 24, 25]
-    dof_pos = dof_pos[...,dof_idx_twist_from_gmr]
-    # Convert to euler (roll, pitch, yaw)
+    # Get command (numpy arrays) and convert to batched torch tensors
+    command = switch4eai_controller.get_command()
+
+    # root_pos: (3,) -> (1,1,3)
+    root_pos = torch.tensor(command['root_pos'], device=device, dtype=torch.float32).reshape(1, 1, 3)
+    # root_rot: (4,) -> (1,4)
+    root_rot = torch.tensor(command['root_rot'], device=device, dtype=torch.float32).reshape(1, 4)
+    # velocities: (3,) -> (1,3)
+    root_vel = torch.tensor(command['root_vel'], device=device, dtype=torch.float32).reshape(1, 3)
+    root_ang_vel = torch.tensor(command['root_ang_vel'], device=device, dtype=torch.float32).reshape(1, 3)
+    # dof_pos: (N,) -> (1,1,N)
+    dof_pos = torch.tensor(command['dof_pos'], device=device, dtype=torch.float32).reshape(1, 1, -1)
+    body_pos = None
+
+    # euler_from_quaternion and quat_rotate_inverse_torch expect batched torch tensors
     roll, pitch, yaw = euler_from_quaternion(root_rot)
-    roll = roll.reshape(1, -1, 1)
-    pitch = pitch.reshape(1, -1, 1)
-    yaw = yaw.reshape(1, -1, 1)
+    # roll/pitch/yaw are (batch,) -> reshape to (1,1,1)
+    roll = roll.reshape(1, 1, 1)
+    pitch = pitch.reshape(1, 1, 1)
+    yaw = yaw.reshape(1, 1, 1)
 
-    # Transform velocities to root frame
-    root_vel = quat_rotate_inverse_torch(root_rot, root_vel).reshape(1, -1, 3)
-    root_ang_vel = quat_rotate_inverse_torch(root_rot, root_ang_vel).reshape(1, -1, 3)
-
-    root_pos = root_pos.reshape(1, -1, 3)
-    dof_pos = dof_pos.reshape(1, -1, dof_pos.shape[-1])
+    # Transform velocities to root frame. Output shape (batch,3) -> reshape to (1,1,3)
+    root_vel = quat_rotate_inverse_torch(root_rot, root_vel).reshape(1, 1, 3)
+    root_ang_vel = quat_rotate_inverse_torch(root_rot, root_ang_vel).reshape(1, 1, 3)
     
     if robot_type == "g1":
         dof_pos_with_wrist = torch.zeros(25, device=device).reshape(1, 1, 25)
@@ -125,7 +217,7 @@ def main(args, xml_file, robot_base):
 
     # 2. Load motion library
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    motion_lib = MotionLib(args.motion_file, device=device)
+    switch4eai_controller = Switch4EAIController(sleep_interval=0.001)
     
     # 3. Prepare the steps array
     tar_obs_steps = [int(x.strip()) for x in args.steps.split(",")]
@@ -134,9 +226,9 @@ def main(args, xml_file, robot_base):
     # 4. Loop over time steps and publish mimic obs
     control_dt = 0.02
     # compute num_steps based on motion length
-    motion_id = torch.tensor([0], device=device, dtype=torch.long)
-    motion_length = motion_lib.get_motion_length(motion_id)
-    num_steps = int(motion_length / control_dt)
+    motion_id = None
+    motion_length = BIG_NUMBER
+    num_steps = BIG_NUMBER
     
     print(f"[Motion Server] Streaming for {num_steps} steps at dt={control_dt:.3f} seconds...")
 
@@ -153,11 +245,15 @@ def main(args, xml_file, robot_base):
             t0 = time.time()
 
             # Build a mimic obs from the motion library
-            mimic_obs, root_pos, root_rot, dof_pos, root_vel, root_ang_vel = build_mimic_obs(
-                motion_lib=motion_lib,
-                t_step=t_step,
-                control_dt=control_dt,
-                tar_obs_steps=tar_obs_steps_tensor,
+            # mimic_obs, root_pos, root_rot, dof_pos, root_vel, root_ang_vel = build_mimic_obs(
+            #     motion_lib=motion_lib,
+            #     t_step=t_step,
+            #     control_dt=control_dt,
+            #     tar_obs_steps=tar_obs_steps_tensor,
+            #     robot_type=args.robot
+            # )
+            mimic_obs, root_pos, root_rot, dof_pos, root_vel, root_ang_vel = build_mimic_obs_switch4eai(
+                switch4eai_controller=switch4eai_controller,
                 robot_type=args.robot
             )
             if vis_root_vel:

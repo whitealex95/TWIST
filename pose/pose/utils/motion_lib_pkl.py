@@ -1,5 +1,6 @@
 import os, pickle, yaml
 import logging
+import numpy as np
 
 import torch
 
@@ -52,7 +53,30 @@ class MotionLib:
             self._motion_names.append(os.path.basename(curr_file))
             try:
                 with open(curr_file, "rb") as f:
-                    motion_data = pickle.load(f)
+                    try:
+                        motion_data = pickle.load(f)
+                    except ModuleNotFoundError as e:
+                        if 'numpy._core' in str(e):
+                            # Handle numpy version compatibility issue
+                            import numpy as np
+                            import sys
+                            # Create a comprehensive compatibility mapping for numpy._core
+                            sys.modules['numpy._core'] = np
+                            sys.modules['numpy._core.multiarray'] = np.core.multiarray
+                            sys.modules['numpy._core._multiarray_umath'] = np.core._multiarray_umath
+                            sys.modules['numpy._core.umath'] = np.core.umath
+                            sys.modules['numpy._core.numeric'] = np.core.numeric
+                            try:
+                                sys.modules['numpy._core._exceptions'] = np.core._exceptions
+                            except AttributeError:
+                                # Create a mock module for _exceptions if it doesn't exist
+                                import types
+                                mock_exceptions = types.ModuleType('numpy._core._exceptions')
+                                sys.modules['numpy._core._exceptions'] = mock_exceptions
+                            f.seek(0)  # Reset file pointer
+                            motion_data = pickle.load(f)
+                        else:
+                            raise e
                     
                     fps = motion_data["fps"]
                     curr_weight = motion_weights[i]
@@ -61,9 +85,16 @@ class MotionLib:
                     root_pos = torch.tensor(motion_data["root_pos"], dtype=torch.float, device=self._device)
                     root_rot = torch.tensor(motion_data["root_rot"], dtype=torch.float, device=self._device)
                     dof_pos = torch.tensor(motion_data["dof_pos"], dtype=torch.float, device=self._device)
-                    local_body_pos = torch.tensor(motion_data["local_body_pos"], dtype=torch.float, device=self._device)
+
+                    if motion_data["local_body_pos"] is not None:
+                        local_body_pos = torch.tensor(motion_data["local_body_pos"], dtype=torch.float, device=self._device)
+                    else:
+                        local_body_pos = torch.zeros((root_pos.shape[0], 1, 3), dtype=torch.float, device=self._device)
                     if i == 0:
-                        self._body_link_list = motion_data["link_body_list"]
+                        if motion_data["link_body_list"] is not None:
+                            self._body_link_list = motion_data["link_body_list"]
+                        else:
+                            self._body_link_list = []
                     
                     num_frames = root_pos.shape[0]
                     curr_len = dt * (num_frames - 1)
