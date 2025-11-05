@@ -13,6 +13,10 @@ from data_utils.params import DEFAULT_MIMIC_OBS
 import os
 from data_utils.rot_utils import quatToEuler
 
+import datetime
+import csv
+import atexit
+
 def draw_root_velocity(mujoco_model, mujoco_data, mujoco_viewer, tgt_root_vel, init_geom_id, root_name, rgba_velocity=[1, 1, 0, 1]):
     """
     Draws an arrow representing velocity, for debug/visualization.
@@ -193,6 +197,14 @@ class RealTimePolicyController:
 
         self.record_video = record_video
 
+        # Setup logging
+        self.log_dir = "logs"
+        os.makedirs(self.log_dir, exist_ok=True)
+        self.log_path = f"{self.log_dir}/sim_log_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+        self.log_file = open(self.log_path, "a", newline="")
+        self.csv_writer = csv.writer(self.log_file)
+        atexit.register(self.log_file.close)
+    
     def extract_data(self):
         qpos = self.data.qpos.astype(np.float32)
         qvel = self.data.qvel.astype(np.float32)
@@ -336,6 +348,15 @@ class RealTimePolicyController:
                 self.data.ctrl[:] = torque
                 
                 mujoco.mj_step(self.model, self.data)
+                
+                # Log data
+                # 1(timestamp) + 23(dof_pos) + 4(quat: wxyz mujoco convension) = 268 columns
+                # We assume dof_pos of order: 6 left leg, 6 right leg, 3 torso, 4 left arm, 4 right arm without wrist
+                timestamp = time.time()
+                row = [timestamp] + body_dof_pos.tolist() + quat.tolist()
+                self.csv_writer.writerow(row)
+                self.log_file.flush()  # make sure it’s written immediately
+                
                 # sleep to maintain real-time pace
                 elapsed = time.time() - t_start
                 if elapsed < self.sim_dt:

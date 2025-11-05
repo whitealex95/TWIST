@@ -20,6 +20,9 @@ from data_utils.rot_utils import quatToEuler
 from data_utils.params import DEX31_QPOS_OPEN, DEX31_QPOS_CLOSE
 
 # from robot_control.speaker import Speaker
+import datetime
+import csv
+import atexit
 
 def extract_mimic_obs_to_body_and_wrist(mimic_obs):
     total_degrees = 33
@@ -83,6 +86,14 @@ class RealTimePolicyControllerReal(object):
 
         self.control_dt = self.config.control_dt
         self.action_scale = self.config.action_scale
+
+        # Setup logging
+        self.log_dir = "logs"
+        os.makedirs(self.log_dir, exist_ok=True)
+        self.log_path = f"{self.log_dir}/real_log_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+        self.log_file = open(self.log_path, "a", newline="")
+        self.csv_writer = csv.writer(self.log_file)
+        atexit.register(self.log_file.close)
         
     def reset_robot(self):
         """
@@ -172,6 +183,15 @@ class RealTimePolicyControllerReal(object):
                 self.env.send_robot_action(target_dof_pos, kp_scale, kd_scale,
                                            left_wrist_roll=wrist_dof_pos[0], right_wrist_roll=wrist_dof_pos[1])
                 
+                # Log data
+                # 1(timestamp) + 23(dof_pos) + 4(quat: wxyz mujoco convension) = 268 columns
+                # We assume dof_pos of order: 6 left leg, 6 right leg, 3 torso, 4 left arm, 4 right arm without wrist
+                timestamp = time.time()
+                row = [timestamp] + dof_pos.tolist() + quat.tolist()
+                self.csv_writer.writerow(row)
+                self.log_file.flush()  # make sure it’s written immediately
+                
+
                 elapsed = time.time() - t_start
                 if elapsed < self.control_dt:
                     time.sleep(self.control_dt - elapsed)
