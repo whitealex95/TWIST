@@ -184,7 +184,7 @@ class G1RealWorldEnv:
         # TODO: add wrist
             
         # imu_state quaternion: w, x, y, z
-        quat = self.low_state.imu_state.quaternion
+        quat = np.array(self.low_state.imu_state.quaternion, dtype=np.float32)
         ang_vel = np.array(self.low_state.imu_state.gyroscope, dtype=np.float32)
        
         
