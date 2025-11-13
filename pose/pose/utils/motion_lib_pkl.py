@@ -137,6 +137,14 @@ class MotionLib:
                 logger.error(f"Error loading motion file {curr_file}: {e}")
                 continue
         
+        # Check if any motions were successfully loaded
+        if len(self._motion_root_pos_delta) == 0:
+            raise RuntimeError(
+                f"No motion files were successfully loaded. "
+                f"Attempted to load {num_motion_files} file(s). "
+                f"Please check that the motion file path(s) exist and are valid pickle files."
+            )
+        
         self._motion_weights = torch.tensor(self._motion_weights, dtype=torch.float, device=self._device)
         self._motion_weights /= torch.sum(self._motion_weights)
         
@@ -193,6 +201,8 @@ class MotionLib:
         if motion_file.endswith(".yaml"):
             motion_files = []
             motion_weights = []
+            if not os.path.exists(motion_file):
+                raise FileNotFoundError(f"Motion config file not found: {motion_file}")
             with open(motion_file, "r") as f:
                 motion_config = yaml.load(f, Loader=yaml.SafeLoader)
             
@@ -206,6 +216,11 @@ class MotionLib:
                 motion_weights.append(curr_weight)
                 motion_files.append(curr_file)
         else:
+            if not os.path.exists(motion_file):
+                raise FileNotFoundError(
+                    f"Motion file not found: {motion_file}\n"
+                    f"Please check that the file path is correct and the file exists."
+                )
             motion_files = [motion_file]
             motion_weights = [1.0]
         
